@@ -1,4 +1,73 @@
 #!/usr/bin/env python3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Target Structure
+```python
+sow = SOW()
+sow.load_data()
+sow.process_documents()
+sow.select_template()
+sow.generate_narrative()
+sow.enhance_narrative()
+final_output = sow.get_final_output()
+```
+
+## Current Workflow Analysis
+
+### Current Flow (from existing code):
+```
+1. get_gpt_answers_for_client() - Main orchestrator
+   ├── Load client data from CRDB
+   ├── Get client documents
+   ├── Process documents with OCR
+   ├── Extract information with GPT
+   └── Return structured data
+
+2. generate_sow_narrative_with_separate_template_and_values()
+   ├── Load YAML template
+   ├── Combine client data + GPT answers
+   ├── Generate narrative using template
+   └── Return narrative with controls
+
+3. Final enhancement with rephrase_narrative.txt
+   ├── Clean narrative
+   ├── Apply rephrasing prompt
+   └── Generate final output
+```
+
+## Proposed Refactored Design
+
+### 1. Main SOW Class
+```python
+class SOW:
+    def __init__(self, config):
+        self.data_loader = DataLoader(config)
+        self.document_processor = DocumentProcessor(config)
+        self.information_extractor = InformationExtractor(config)
+        self.template_manager = TemplateManager(config)
+        self.narrative_generator = NarrativeGenerator(config)
+        self.narrative_enhancer = NarrativeEnhancer(config)
+    
+    def process_client(self, client_id, scenario=None):
+        # Main workflow
+        pass
+        
 """
 Standalone SOW Pipeline with Bedrock LLM
 ========================================
