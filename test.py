@@ -1107,3 +1107,600 @@ def main():
 if __name__ == "__main__":
     print("🚀 Starting standalone SOW pipeline...")
     main()
+
+
+####################
+
+"""
+Main SOW class for refactored SOW narrative generation system.
+"""
+
+import os
+import json
+import logging
+from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime
+from pathlib import Path
+
+from config.settings import ConfigManager, SOWConfig
+from config.constants import ClientType, ScenarioType, Environment
+from llm.openai_client import OpenAIClient
+from llm.prompt_manager import PromptManager
+from utils.document_utils import DocumentProcessor, DocumentValidator
+from utils.narrative_utils import NarrativeGenerator, NarrativeValidator
+from utils.data_utils import DataProcessor, DataValidator
+from utils.validation_utils import SOWValidator
+
+
+class SOWProcessor:
+    """
+    Main SOW processor class that orchestrates the entire SOW narrative generation process.
+    """
+    
+    def __init__(
+        self, 
+        config_path: Optional[str] = None,
+        logger: Optional[logging.Logger] = None
+    ):
+        """
+        Initialize SOW processor.
+        
+        Args:
+            config_path: Path to configuration file
+            logger: Logger instance
+        """
+        self.logger = logger or logging.getLogger(__name__)
+        
+        # Initialize configuration
+        self.config_manager = ConfigManager(config_path)
+        self.config = SOWConfig(self.config_manager)
+        
+        # Initialize validators
+        self.validator = SOWValidator(self.logger)
+        self.data_validator = DataValidator(self.logger)
+        self.narrative_validator = NarrativeValidator(self.logger)
+        self.document_validator = DocumentValidator(self.logger)
+        
+        # Initialize processors
+        self.data_processor = DataProcessor(self.logger)
+        self.document_processor = DocumentProcessor(self.logger)
+        self.narrative_generator = NarrativeGenerator(self.logger)
+        
+        # Initialize prompt manager
+        self.prompt_manager = PromptManager(self.config.prompts_dir, self.logger)
+        
+        # Initialize clients (will be set up when needed)
+        self.openai_client = None
+        self.document_client = None
+        self.crdb_client = None
+        self.db_client = None
+        
+        self.logger.info("SOW processor initialized successfully")
+    
+    def setup_clients(self, credentials: Dict[str, Any]) -> None:
+        """
+        Setup external clients with credentials.
+        
+        Args:
+            credentials: API credentials and configuration
+        """
+        try:
+            # Validate credentials
+            cred_validation = self.validator.validate_api_credentials(credentials)
+            if not cred_validation.is_valid:
+                raise ValueError(f"Invalid credentials: {cred_validation.issues}")
+            
+            # Setup OpenAI client
+            api_config = self.config.get_api_config()
+            self.openai_client = OpenAIClient(
+                api_key=credentials['openai_api_key'],
+                api_endpoint=api_config['openai_api_endpoint'],
+                api_version=api_config['openai_api_version'],
+                deployment_name=api_config['openai_deployment_name'],
+                model_name=api_config['openai_model_name'],
+                temperature=api_config['openai_temperature'],
+                logger=self.logger
+            )
+            
+            # Setup other clients (placeholder for now)
+            # self.document_client = AzureDocumentClient(...)
+            # self.crdb_client = CRDBClient(...)
+            # self.db_client = DatabaseClient(...)
+            
+            self.logger.info("External clients setup successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error setting up clients: {str(e)}")
+            raise
+    
+    def process_client(
+        self, 
+        client_id: int, 
+        scenario: Optional[str] = None,
+        enable_document_process: bool = True,
+        use_existing_sow: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Process a client to generate SOW narrative.
+        
+        Args:
+            client_id: Client identifier
+            scenario: Specific scenario to process (optional)
+            enable_document_process: Whether to process documents
+            use_existing_sow: Whether to use existing SOW data
+            
+        Returns:
+            Processing result with narrative and metadata
+        """
+        try:
+            # Validate input
+            client_validation = self.validator.validate_client_id(client_id)
+            if not client_validation.is_valid:
+                raise ValueError(f"Invalid client ID: {client_validation.issues}")
+            
+            if scenario:
+                scenario_validation = self.validator.validate_scenario_type(scenario)
+                if not scenario_validation.is_valid:
+                    raise ValueError(f"Invalid scenario: {scenario_validation.issues}")
+            
+            self.logger.info(f"Starting SOW processing for client: {client_id}")
+            
+            # Step 1: Retrieve client data
+            client_data = self._retrieve_client_data(client_id)
+            if not client_data:
+                raise ValueError(f"No client data found for client: {client_id}")
+            
+            # Step 2: Get client documents
+            client_documents = self._get_client_documents(client_id)
+            if not client_documents:
+                self.logger.warning(f"No documents found for client: {client_id}")
+            
+            # Step 3: Process documents with GPT (if enabled)
+            gpt_answers = {}
+            if enable_document_process and client_documents:
+                gpt_answers = self._process_documents_with_gpt(
+                    client_documents, client_data, scenario
+                )
+            
+            # Step 4: Load narrative template
+            client_type = self.data_processor.extract_client_type(client_data)
+            if not client_type:
+                raise ValueError("Could not determine client type")
+            
+            template = self._load_narrative_template(client_type)
+            if not template:
+                raise ValueError(f"No template found for client type: {client_type}")
+            
+            # Step 5: Generate narrative
+            narrative_result = self._generate_narrative(
+                client_data, template, gpt_answers
+            )
+            
+            # Step 6: Enhance narrative
+            enhanced_narrative = self._enhance_narrative(narrative_result['final_narrative'])
+            
+            # Step 7: Create final result
+            result = self._create_final_result(
+                client_id, client_data, enhanced_narrative, 
+                narrative_result, gpt_answers
+            )
+            
+            self.logger.info(f"Successfully processed client: {client_id}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error processing client {client_id}: {str(e)}")
+            raise
+    
+    def _retrieve_client_data(self, client_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve client data from CRDB.
+        
+        Args:
+            client_id: Client identifier
+            
+        Returns:
+            Client data or None if not found
+        """
+        try:
+            # Placeholder for CRDB integration
+            # This would call the actual CRDB client
+            self.logger.info(f"Retrieving client data for: {client_id}")
+            
+            # Mock client data for now
+            mock_client_data = {
+                'basic': {
+                    'client_id': client_id,
+                    'client_name': f'Client {client_id}',
+                    'client_type_label': 'individual',
+                    'aml_risk_category': 'Medium'
+                },
+                'individual': {
+                    'client_name': f'Client {client_id}',
+                    'date_of_birth': '1990-01-01',
+                    'nationality': 'US',
+                    'occupation': 'Software Engineer'
+                },
+                'scenarios_parsed': {
+                    'intro': [{}],
+                    'employment_income': [{}],
+                    'business_ownership': [{}]
+                }
+            }
+            
+            return mock_client_data
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving client data: {str(e)}")
+            return None
+    
+    def _get_client_documents(self, client_id: int) -> List[Dict[str, Any]]:
+        """
+        Get client documents.
+        
+        Args:
+            client_id: Client identifier
+            
+        Returns:
+            List of client documents
+        """
+        try:
+            # Placeholder for document retrieval
+            # This would call the actual document service
+            self.logger.info(f"Retrieving documents for client: {client_id}")
+            
+            # Mock documents for now
+            mock_documents = [
+                {
+                    'id': f'doc_{client_id}_1',
+                    'title': 'Client Document 1',
+                    'content': 'Sample document content...',
+                    'type': 'corroborating_document',
+                    'formname': 'CL-CORROB'
+                }
+            ]
+            
+            return mock_documents
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving client documents: {str(e)}")
+            return []
+    
+    def _process_documents_with_gpt(
+        self, 
+        documents: List[Dict[str, Any]], 
+        client_data: Dict[str, Any],
+        scenario: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Process documents with GPT to extract information.
+        
+        Args:
+            documents: List of documents to process
+            client_data: Client data
+            scenario: Specific scenario to process
+            
+        Returns:
+            GPT answers
+        """
+        try:
+            if not self.openai_client:
+                raise ValueError("OpenAI client not initialized")
+            
+            self.logger.info(f"Processing {len(documents)} documents with GPT")
+            
+            client_type = self.data_processor.extract_client_type(client_data)
+            if not client_type:
+                raise ValueError("Could not determine client type")
+            
+            # Load intro prompt
+            intro_prompt = self.prompt_manager.load_intro_prompt(ClientType(client_type))
+            
+            # Process intro information
+            intro_answers = {}
+            for document in documents:
+                if not self.document_validator.validate_document(document)[0]:
+                    continue
+                
+                # Process document with intro prompt
+                document_answers = self.openai_client.process_document_with_prompt_sync(
+                    document['content'], intro_prompt
+                )
+                
+                # Clean and merge answers
+                cleaned_answers = self.data_processor.clean_gpt_answers(document_answers)
+                intro_answers = self.data_processor.merge_gpt_answers(
+                    intro_answers, cleaned_answers
+                )
+            
+            # Process scenarios if not specific scenario requested
+            scenario_answers = {}
+            if not scenario or scenario != 'intro':
+                scenario_answers = self._process_scenarios_with_gpt(
+                    documents, client_data, scenario
+                )
+            
+            return {
+                'intro': intro_answers,
+                'scenarios_info_from_gpt': scenario_answers
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error processing documents with GPT: {str(e)}")
+            return {}
+    
+    def _process_scenarios_with_gpt(
+        self, 
+        documents: List[Dict[str, Any]], 
+        client_data: Dict[str, Any],
+        scenario: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Process scenarios with GPT.
+        
+        Args:
+            documents: List of documents
+            client_data: Client data
+            scenario: Specific scenario to process
+            
+        Returns:
+            Scenario answers
+        """
+        try:
+            scenario_answers = {}
+            
+            # Get available scenarios
+            available_scenarios = list(MESSAGE_SUB_CLASSIFICATIONS.keys())
+            if scenario:
+                available_scenarios = [scenario]
+            
+            for scenario_name in available_scenarios:
+                if scenario_name == 'intro':
+                    continue
+                
+                try:
+                    # Load scenario prompt
+                    scenario_prompt = self.prompt_manager.load_scenario_prompt(
+                        ScenarioType(scenario_name)
+                    )
+                    
+                    # Process documents for this scenario
+                    scenario_data = []
+                    for document in documents:
+                        if not self.document_validator.validate_document(document)[0]:
+                            continue
+                        
+                        # Process document with scenario prompt
+                        document_answers = self.openai_client.process_document_with_prompt_sync(
+                            document['content'], scenario_prompt
+                        )
+                        
+                        # Clean answers
+                        cleaned_answers = self.data_processor.clean_gpt_answers(document_answers)
+                        if cleaned_answers:
+                            scenario_data.append(cleaned_answers)
+                    
+                    scenario_answers[scenario_name] = scenario_data
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error processing scenario {scenario_name}: {str(e)}")
+                    continue
+            
+            return scenario_answers
+            
+        except Exception as e:
+            self.logger.error(f"Error processing scenarios with GPT: {str(e)}")
+            return {}
+    
+    def _load_narrative_template(self, client_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Load narrative template for client type.
+        
+        Args:
+            client_type: Client type
+            
+        Returns:
+            Narrative template or None if not found
+        """
+        try:
+            # Placeholder for template loading
+            # This would load from the templates directory
+            self.logger.info(f"Loading template for client type: {client_type}")
+            
+            # Mock template for now
+            mock_template = {
+                'intro': '<p>Introduction for {client_name}</p>',
+                'sow_scenarios': {
+                    'employment_income': '<p>Employment income: {occupation}</p>',
+                    'business_ownership': '<p>Business ownership: {business_name}</p>'
+                }
+            }
+            
+            return mock_template
+            
+        except Exception as e:
+            self.logger.error(f"Error loading template: {str(e)}")
+            return None
+    
+    def _generate_narrative(
+        self, 
+        client_data: Dict[str, Any], 
+        template: Dict[str, Any], 
+        gpt_answers: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Generate narrative from template and data.
+        
+        Args:
+            client_data: Client data
+            template: Narrative template
+            gpt_answers: GPT answers
+            
+        Returns:
+            Generated narrative result
+        """
+        try:
+            self.logger.info("Generating narrative from template")
+            
+            # Generate narrative using the narrative generator
+            result = self.narrative_generator.generate_narrative_from_template(
+                client_data, template, gpt_answers, return_missing_scenarios=True
+            )
+            
+            # Validate narrative
+            narrative_validation = self.narrative_validator.validate_narrative(
+                result['final_narrative']
+            )
+            if not narrative_validation.is_valid:
+                self.logger.warning(f"Narrative validation issues: {narrative_validation.issues}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error generating narrative: {str(e)}")
+            raise
+    
+    def _enhance_narrative(self, narrative: str) -> str:
+        """
+        Enhance narrative with rephrasing and formatting.
+        
+        Args:
+            narrative: Original narrative
+            
+        Returns:
+            Enhanced narrative
+        """
+        try:
+            if not self.openai_client:
+                return narrative
+            
+            self.logger.info("Enhancing narrative")
+            
+            # Load rephrase prompt
+            rephrase_prompt = self.prompt_manager.load_rephrase_prompt()
+            
+            # Create final prompt
+            final_prompt = f"{rephrase_prompt}\n{narrative}"
+            
+            # Execute rephrasing
+            enhanced_narrative = self.openai_client.execute_prompt_sync(final_prompt)
+            
+            # Validate enhanced narrative
+            validation = self.narrative_validator.validate_narrative(enhanced_narrative)
+            if not validation.is_valid:
+                self.logger.warning(f"Enhanced narrative validation issues: {validation.issues}")
+                return narrative  # Return original if enhancement failed
+            
+            return enhanced_narrative
+            
+        except Exception as e:
+            self.logger.error(f"Error enhancing narrative: {str(e)}")
+            return narrative  # Return original if enhancement failed
+    
+    def _create_final_result(
+        self, 
+        client_id: int, 
+        client_data: Dict[str, Any], 
+        narrative: str,
+        narrative_result: Dict[str, Any],
+        gpt_answers: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create final processing result.
+        
+        Args:
+            client_id: Client identifier
+            client_data: Client data
+            narrative: Final narrative
+            narrative_result: Narrative generation result
+            gpt_answers: GPT answers
+            
+        Returns:
+            Final processing result
+        """
+        try:
+            client_type = self.data_processor.extract_client_type(client_data)
+            
+            result = {
+                'client_identifier': client_id,
+                'client_type': client_type,
+                'client_name': client_data.get('basic', {}).get('client_name', ''),
+                'aml_risk_category': client_data.get('basic', {}).get('aml_risk_category', ''),
+                'narrative': narrative,
+                'missing_scenarios': list(narrative_result.get('missing_scenarios', {}).keys()),
+                'missing_scenario_narratives': json.dumps(narrative_result.get('missing_scenarios', {})),
+                'created_on': datetime.now(),
+                'openai_allowed': 1,
+                'existing_scenarios': narrative_result.get('existing_scenarios', []),
+                'gpt_answers': gpt_answers,
+                'processing_metadata': {
+                    'config_version': '1.0',
+                    'processing_time': datetime.now().isoformat(),
+                    'narrative_length': len(narrative),
+                    'scenarios_processed': len(narrative_result.get('existing_scenarios', []))
+                }
+            }
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error creating final result: {str(e)}")
+            raise
+    
+    def get_processing_status(self, client_id: int) -> Dict[str, Any]:
+        """
+        Get processing status for a client.
+        
+        Args:
+            client_id: Client identifier
+            
+        Returns:
+            Processing status information
+        """
+        try:
+            # Placeholder for status checking
+            # This would check the database for processing status
+            return {
+                'client_id': client_id,
+                'status': 'completed',
+                'last_updated': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting processing status: {str(e)}")
+            return {
+                'client_id': client_id,
+                'status': 'error',
+                'error': str(e)
+            }
+    
+    def get_system_info(self) -> Dict[str, Any]:
+        """
+        Get system information and configuration.
+        
+        Returns:
+            System information
+        """
+        try:
+            return {
+                'config': {
+                    'data_dir': self.config.data_dir,
+                    'prompts_dir': self.config.prompts_dir,
+                    'templates_dir': self.config.templates_dir,
+                    'token_limit': self.config.token_limit,
+                    'max_workers': self.config.max_workers
+                },
+                'clients': {
+                    'openai_configured': self.openai_client is not None,
+                    'document_client_configured': self.document_client is not None,
+                    'crdb_client_configured': self.crdb_client is not None,
+                    'db_client_configured': self.db_client is not None
+                },
+                'prompts': self.prompt_manager.get_available_prompts(),
+                'version': '1.0.0'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting system info: {str(e)}")
+            return {'error': str(e)}
+
