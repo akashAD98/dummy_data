@@ -1704,3 +1704,73 @@ class SOWProcessor:
             self.logger.error(f"Error getting system info: {str(e)}")
             return {'error': str(e)}
 
+
+#################
+
+# SOW Refactoring Project
+
+This folder contains the refactored SOW (Source of Wealth) narrative generation system with improved structure and organization.
+
+## Folder Structure
+
+```
+refactoring_sow/
+├── README.md
+├── main_sow_class.py          # Main SOW orchestrator class
+├── config/
+│   ├── __init__.py
+│   ├── settings.py            # Configuration management
+│   └── constants.py           # Constants and enums
+├── llm/
+│   ├── __init__.py
+│   ├── openai_client.py       # OpenAI client wrapper
+│   └── prompt_manager.py      # Prompt management
+├── prompts/
+│   ├── __init__.py
+│   ├── intro/                 # Introduction prompts
+│   ├── scenarios/             # Scenario-specific prompts
+│   └── templates/             # Narrative templates
+├── utils/
+│   ├── __init__.py
+│   ├── document_utils.py      # Document processing utilities
+│   ├── narrative_utils.py     # Narrative generation utilities
+│   ├── data_utils.py          # Data processing utilities
+│   └── validation_utils.py    # Validation utilities
+└── examples/
+    ├── __init__.py
+    └── usage_example.py       # Usage examples
+```
+
+## Key Improvements
+
+1. **Better Organization**: Clear separation of concerns with dedicated folders
+2. **Class-based Design**: More maintainable and testable code
+3. **Configuration Management**: Centralized configuration handling
+4. **Prompt Management**: Organized prompt templates
+5. **Utility Functions**: Well-organized utility modules
+6. **Error Handling**: Improved error handling and logging
+7. **Type Hints**: Better code documentation and IDE support
+
+## Usage
+
+```python
+from main_sow_class import SOWProcessor
+
+# Initialize processor
+processor = SOWProcessor(config_path="config/settings.py")
+
+# Process client
+result = processor.process_client(
+    client_id=12345,
+    scenario="intro",
+    enable_document_process=True
+)
+```
+
+
+
+
+
+
+
+###########
